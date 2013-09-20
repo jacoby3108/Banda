@@ -304,24 +304,56 @@ assemble(unsigned char bit)
 			return;
 	
 	
-	rx_data>>=bit;	
+		
 	
 	
+	switch (state)
+
+
+	case (WAIT_FOR_ONE):
+
 	
-	if(bit&0x01)
+		if(bit&0x01)
+		{
+			bit_count=5;	
+			state=START_READING;		
 	
-		bit_count=5;	
+		}
+		else
+	 
+		return;
+	
+	
+	break;
+
+	case(START_READING):
+	
+		if(bit_count)
+		{
+			rx_data>>=bit;
+			bit_count--;
+		}	
+		else 
+		{
+			if(rx_data==SS)
+			{
+				*p2buffer++=rx_data&DATA_MASK;	
+				bit_count=5;
+			{
+			else 
+			{
+
+							
+
+		}
+	
+
+	break;		
+
+		
+	default:
+	break;
 			
-	
-	
-	else
-	
-			
-			
-		
-		
-		
-		
 		
 
 
