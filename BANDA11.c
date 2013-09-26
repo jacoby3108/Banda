@@ -38,10 +38,21 @@
 #define WAITING_FOR_SS  0
 
 #define WAITING_FOR_DATA  1
+
+#define WAITING_FOR_LRC 2
+
+
                               
 #define MAXCAP  300
 
-#define OK 1 
+#define OK 1
+ 
+#define NOT_FINISHED 1
+#define END_BAND 0
+#define BAD_BAND -1 
+#define BAD_PARITY -2
+
+
 
 
 
@@ -68,15 +79,16 @@ enable	equ	7	      |	 enable       ->  Amarillo   |
 
 */
 
-
+BYTE Lrc_Sum;
+BYTE LRC;
 BYTE capture [MAXCAP];
 BYTE data_buff[100];                
 unsigned int pnt=0;
 
 BYTE read_ban(void);
 
-void assemble(unsigned char bit);
-void slow(void);
+int assemble(unsigned char bit);
+int slow(void);
 BYTE chk_odd_parity(BYTE val);
 
 void main(void) {
@@ -96,6 +108,9 @@ BYTE read_ban(void)
   static tmpbit;
   
   int i=0,j;
+  pnt=0;
+  
+  
 
   if (!(PORTBAN & PIN_ENABLE))  /* Acitve low !! */
   {
@@ -113,11 +128,11 @@ BYTE read_ban(void)
 				      
 				    tmpbit=(PORTBAN & PIN_DATA)^PIN_DATA;  /* Isolate bit and invert */
 				      
-		        #if DEBUG == TRUE
+		       
 		        
 		        capture[i++]=tmpbit;  
 		
-		        #endif
+		        
 		        
 		        /* assemble(tmpbit); */          /* only for fast processors */ 
 		        
@@ -129,9 +144,9 @@ BYTE read_ban(void)
 		    
 	    }		    
 		    
-		    slow();
+		    slow();     /* Process adquired data */
 	
-  } 
+  } /* Enable released */
   
   else 
   {
@@ -147,20 +162,27 @@ return(0);
 }
 
 
-void slow(void)
+int slow(void)
 
 {
 
 int i;
+int status=NOT_FINISHED;
 
-    for(i=0;i<=MAXCAP;i++)
+    for(i=0;i<=MAXCAP ;i++)
     
     {
-        assemble( capture[i] );
-      
+        status=assemble(capture[i]);
+            
+      if(status!=NOT_FINISHED)  
+         
+        return(status);
+          
+            
     }
     
-    
+   
+   return(status);
     
     
 
@@ -171,7 +193,7 @@ int i;
 
 
 
-void assemble(unsigned char bit)
+int assemble(unsigned char bit)
 
 {
 		
@@ -191,7 +213,7 @@ static count=5;
 
 
     
-    switch (state)  {
+  switch (state)  {
     
    
    
@@ -199,10 +221,20 @@ static count=5;
     
       if( (rx_data & ABA_MASK) == (START_SENTINEL << 3)) {
         
-        printf("SS found \n");
+    
+        #if DEBUG == TRUE
+    
+        printf("Start Sentinel Found \n");
+        
+        #endif
+        
+        
         state=WAITING_FOR_DATA;
         count=5;
         pnt=0;
+        
+        
+        Lrc_Sum=START_SENTINEL;
         
       }
         
@@ -211,22 +243,57 @@ static count=5;
 
    case WAITING_FOR_DATA:
    
-          putchar((rx_data&0x80)?0x31:0x30);
-          
-         
-          if((--count)==0) { /*if a character was assembled on rx_data store it otherwise continue the assembly process*/
-          
+   
+            #if DEBUG == TRUE
+           
+             putchar((rx_data&0x80)?0x31:0x30);
                       
-              printf("Storing data %d\n",count);
+            #endif
+         
+            if((--count)==0)  /*if a character was assembled on rx_data store it, otherwise continue the assembly process*/
+            {
               
-             
-               /*Check for parity*/
-              
-               if(chk_odd_parity(rx_data & ABA_MASK)!=OK)
                
-                  printf("Parity Error at data %d \n",pnt);
-                
+               
+                  #if DEBUG == TRUE        
+                    printf(" Storing data %d\n",count);
+                  #endif
+              
                               
+                               
+                  /*Check for parity*/
+                  
+                  
+             
+                  if(chk_odd_parity(rx_data & ABA_MASK)!=OK)
+                  {
+               
+                
+                      printf("Parity Error pnt is  %d \n",pnt);
+                  
+                      return(BAD_PARITY);
+                      break;
+                
+                  }
+                  
+                 
+                  /*Field Separator ??*/      
+                         
+                         
+                  if( (rx_data & ABA_MASK) == (FIELD_SEPARATOR << 3)) 
+                  {       
+                           
+                        
+                        Lrc_Sum+=FIELD_SEPARATOR;
+                        data_buff[pnt++]='='; 
+              
+                        count=5;  /*Start a new character*/
+              
+                        break;
+              
+                  }
+                    
+                    
                            
 
                   /*Store assembled data by :
@@ -236,40 +303,128 @@ static count=5;
                   3- Set  P=0 
                   4- Add ASCII bias */                           
               
+              
+                  Lrc_Sum+=(((rx_data&=ABA_MASK)>>3));
                   data_buff[pnt++]= ((((rx_data&=ABA_MASK)>>3)&0x0F) |0x30);      
                   count=5;  /*Start a new character*/
            
        
        
-              /*Check if end of Track*/
+                  /*Check if recieved data signals end of Track*/
           
-              if( (rx_data & ABA_MASK) == (END_SENTINEL << 3)) {        /*End Sentinel ??*/
-           
-                  state=WAITING_FOR_SS;                /*Restart*/
+                   if( (rx_data & ABA_MASK) == (END_SENTINEL << 3))         /*End Sentinel ??*/
+                   {
+                
+              
+                          Lrc_Sum+=END_SENTINEL;
+                          
+                          state=WAITING_FOR_LRC;                /*Next is LRC */
                
-                  data_buff[--pnt]=0;                  /*Put null terminator on data string */
+                          data_buff[--pnt]=0;                  /*Put null terminator on data string */
               
-                  printf("Data Recieved %s \n",data_buff);
+                          printf("Data Recieved %s \n",data_buff);
               
-                  pnt=0;
+                          pnt=0;
+              
+                          count=5;  /* NOW GET LRC */
+              
+                          #if DEBUG == TRUE 
+              
+                            printf("END Seninel \n");
+                  
+                          #endif   
+                   
+                         
+              
+                  }    
               
               
-                  printf("END Seninel \n");
-              
-             }    
-              
-              
-          }
+          }  /* END OF if((--count)==0) There are bits pending */                      
 
-         break;
+          break;   /*No more bits to asemble character complete*/
          
-     default:
+         
+          
+          case WAITING_FOR_LRC:         /* ===LRC=== */
+          
+          
+          
+                #if DEBUG == TRUE
+           
+                  putchar((rx_data&0x80)?0x31:0x30);
+                      
+                #endif
+         
+                
+               
+                 
+                 if((--count)==0)  /*if LRC was assembled store it, otherwise continue the assembly process*/
+                  {
+               
+               
+                   
+                      #if DEBUG == TRUE        
+                        printf(" Storing LRC %d\n",count);
+                      #endif
+                      
+                      
+                       /*Check for parity*/
+              
+             
+             
+             
+                       if(chk_odd_parity(rx_data & ABA_MASK)!=OK)
+                       {
+               
+                
+                            printf("Parity Error on LRC  \n");
+                  
+                            return(BAD_PARITY);
+                            break;
+                
+                       }
+                  
+                      
+                      /*Store assembled data by :
+                  
+                      1- Isolating P b3 b2 b1 b0 (Most significant part of byte rx_data see ABA MASK definiton ) 
+                      2- Shift down until least significand bit of rx_data is reached  
+                      3- Set  P=0 
+                      
+                       */                        
+                        
+              
+                      LRC = ((((rx_data&=ABA_MASK)>>3)&0x1F)); 
+                      
+                      printf("LRC Recieved\n" );
+                      
+                      
+                      /* Lrc_Sum = (((Lrc_Sum ^ 0xFF) + 1) & 0xFF); */
+                                                 
+                                                             
+                      state=WAITING_FOR_SS;                /*Restart*/
+               
+                      return(END_BAND);    
+               
+                  }
+               
+                  break;
+         
+         
+         
+         
+        default:
    
            printf("Something wrong !!!! \n");
           
-          break;
+           return(BAD_BAND);
+           break;
          
-     }
+     }  /*End of Switch*/
+          
+
+
+   return(NOT_FINISHED);
 
 }
 
@@ -282,7 +437,7 @@ static count=5;
  *
  * It returns 1 (OK) if parity is odd 0 otherwise
  *
- * Note: even parity can be checked by Strarting pty=1 instead of 0 
+ * Note: even parity can be checked by Seting pty=1 instead of 0 
  ==============================================================================
  */
 
