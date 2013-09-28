@@ -1,4 +1,8 @@
 
+/*Banda11.c  Fri 27 Sep 2013  V1.0 */
+
+/*Please Look at ISO/IEC 7811-2: 2001(E) for Track 2 specs*/
+  
 
 
 #define BYTE unsigned char
@@ -51,6 +55,7 @@
 #define END_BAND 0
 #define BAD_BAND -1 
 #define BAD_PARITY -2
+#define BAD_LRC -3
 
 
 
@@ -99,6 +104,10 @@ void main(void) {
  exit(0);
   
 }
+
+
+
+
 
 
 BYTE read_ban(void)
@@ -162,12 +171,17 @@ return(0);
 }
 
 
+
+
 int slow(void)
 
 {
 
 int i;
 int status=NOT_FINISHED;
+
+
+    Lrc_Sum=0;
 
     for(i=0;i<=MAXCAP ;i++)
     
@@ -234,7 +248,7 @@ static count=5;
         pnt=0;
         
         
-        Lrc_Sum=START_SENTINEL;
+        Lrc_Sum^=START_SENTINEL&0x0F;
         
       }
         
@@ -256,7 +270,7 @@ static count=5;
                
                
                   #if DEBUG == TRUE        
-                    printf(" Storing data %d\n",count);
+                    printf(" Storing data \n");
                   #endif
               
                               
@@ -284,10 +298,10 @@ static count=5;
                   {       
                            
                         
-                        Lrc_Sum+=FIELD_SEPARATOR;
+                        Lrc_Sum^=FIELD_SEPARATOR&0x0F;
                         data_buff[pnt++]='='; 
               
-                        count=5;  /*Start a new character*/
+                        count=5;  /*Start a new character*/      
               
                         break;
               
@@ -304,7 +318,7 @@ static count=5;
                   4- Add ASCII bias */                           
               
               
-                  Lrc_Sum+=(((rx_data&=ABA_MASK)>>3));
+                  Lrc_Sum^=(((rx_data&=ABA_MASK)>>3)&0x0F);
                   data_buff[pnt++]= ((((rx_data&=ABA_MASK)>>3)&0x0F) |0x30);      
                   count=5;  /*Start a new character*/
            
@@ -316,7 +330,7 @@ static count=5;
                    {
                 
               
-                          Lrc_Sum+=END_SENTINEL;
+                          Lrc_Sum^=END_SENTINEL&0x0F;
                           
                           state=WAITING_FOR_LRC;                /*Next is LRC */
                
@@ -351,7 +365,7 @@ static count=5;
           
                 #if DEBUG == TRUE
            
-                  putchar((rx_data&0x80)?0x31:0x30);
+                  putchar((rx_data&0x80)?0x31:0x30);  /*Show incomming bits*/
                       
                 #endif
          
@@ -364,7 +378,7 @@ static count=5;
                
                    
                       #if DEBUG == TRUE        
-                        printf(" Storing LRC %d\n",count);
+                        printf(" Storing LRC\n");
                       #endif
                       
                       
@@ -394,12 +408,14 @@ static count=5;
                        */                        
                         
               
-                      LRC = ((((rx_data&=ABA_MASK)>>3)&0x1F)); 
+                      LRC = ((((rx_data&=ABA_MASK)>>3)&0x0F));   /*Discard Parity bit and store (Parity bit is not included in LRC calculation) */
                       
                       printf("LRC Recieved\n" );
                       
                       
-                      /* Lrc_Sum = (((Lrc_Sum ^ 0xFF) + 1) & 0xFF); */
+                      if((!Lrc_Sum)&0x0f!=LRC)    /*LRC= SS + DATA + FS + ES sould be even*/
+                      
+                        return(BAD_LRC);
                                                  
                                                              
                       state=WAITING_FOR_SS;                /*Restart*/
